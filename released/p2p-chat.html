@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Безопасный видеочат</title>
+<style>
+:root{--bg:#f5f6f8;--card:#ffffff;--fg:#1d2024;--muted:#6b7280;--line:#e3e6ea;--accent:#0b57d0;--accent2:#e8f0fe;--err:#c0392b;--ok:#1a7f37}
+html[data-theme=dark]{--bg:#17191c;--card:#22252a;--fg:#e8eaed;--muted:#9aa0a6;--line:#33373d;--accent:#8ab4f8;--accent2:#2b3140;--err:#f28b82;--ok:#81c995}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:8px 0 2px}
+h2{font-size:17px;margin:22px 0 8px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.sub{color:var(--muted);margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:var(--accent2);color:var(--fg);cursor:pointer}
+button:hover{filter:brightness(1.05)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+select,textarea,input[type=text]{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);width:100%}
+textarea{min-height:64px;resize:vertical}
+label{display:block;margin:8px 0 2px;color:var(--muted)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1 1 160px;min-width:150px}
+.togglecol{display:flex;flex-direction:column;gap:2px;margin-top:6px;align-items:stretch}
+.togglecol button{flex:none;width:auto}
+.toggleState{font-size:13px;color:var(--muted);margin:0 0 4px 2px}
+.vbox{position:relative;background:#000;border-radius:10px;overflow:hidden;width:320px;height:240px;display:flex;align-items:center;justify-content:center}
+.vbox video{width:100%;height:100%;object-fit:cover;display:block}
+.vbox .hint{color:#fff;position:absolute;text-align:center;padding:8px}
+.meter{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:4px 0 8px}
+.meter i{display:block;height:100%;width:0%;background:var(--accent);transition:width .08s}
+.vidwrap{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+.status{margin:8px 0;color:var(--muted)}
+#log{max-height:260px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:12px/1.5 Consolas,monospace;white-space:pre-wrap}
+#log .err{color:var(--err)}
+.msg{margin:6px 0;padding:6px 10px;border-radius:8px;max-width:80%}
+.msg.me{background:var(--accent2);margin-left:auto}
+.msg.peer{background:var(--line)}
+.msg .st{display:block;font-size:12px;color:var(--muted)}
+#chatBox{max-height:260px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}
+details{margin:14px 0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+summary{cursor:pointer;font-weight:600}
+.hidden{display:none!important}
+small.note{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Безопасный видеочат <button id="btnTheme" style="float:right">Тёмная тема</button></h1>
+<p class="sub">Прямая связь между двумя устройствами. Сервер нужен только чтобы загрузить страницу.</p>
+
+<h2>Устройства</h2>
+<div class="card">
+  <div class="row">
+    <div><label>Камера</label><select id="camList"></select></div>
+    <div><label>Микрофон</label><select id="micList"></select></div>
+    <div><label>Динамик</label><select id="spkList"></select></div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnRefresh">Обновить список устройств</button>
+    <button id="btnCheck">Проверить доступ</button>
+  </div>
+  <label>Усиление микрофона: <span id="gainVal">×1.0</span></label>
+  <input type="range" id="gainRange" min="1" max="5" step="0.1" value="1" style="width:100%">
+  <small class="note">Если микрофон вебкамеры тихий — поднимите ползунок. Усиление применяется к звуку, который уходит собеседнику, и работает во время звонка.</small>
+  <label>Звук микрофона (свой)</label>
+  <div class="meter"><i id="myMeter"></i></div>
+  <div class="status" id="devStatus">Микрофон: включён. Камера: включена. Звук: включён. Видео собеседника: включено.</div>
+  <small class="note">Если в списках нет названий — выдайте доступ к камере и микрофону (кнопка «Проверить доступ»), затем обновите список. После проверки список обновится сам.</small>
+</div>
+
+<h2>Соединение</h2>
+<div class="card">
+  <label>Ваш код</label>
+  <textarea id="ownCode" readonly placeholder="Нажмите «Начать чат» — код появится здесь"></textarea>
+  <div class="row" style="margin-top:6px">
+    <button id="btnCopy">Скопировать</button>
+    <button id="btnStart" class="primary">Начать чат</button>
+  </div>
+  <label>Код собеседника</label>
+  <textarea id="peerCode" placeholder="Вставьте сюда код собеседника"></textarea>
+  <button id="btnApply" style="margin-top:6px">Применить код</button>
+  <div class="status">Соединение: <span id="connState">—</span> · ICE: <span id="iceState">—</span></div>
+  <small class="note">Код сжат и переживает переносы строк; если мессенджер всё же его исказит — в журнале будет точная причина, отправьте код текстовым файлом.</small>
+</div>
+
+<h2>Код безопасности (должен совпадать на обеих сторонах — сверьте голосом)</h2>
+<div class="card">
+  <div style="font-size:28px;letter-spacing:4px;text-align:center;margin:6px 0" id="secCode">······</div>
+  <div class="row"><button id="btnVerify">Коды совпали</button></div>
+  <div class="status" id="secStatus">Сверка не пройдена — звонок и чат заблокированы.</div>
+  <small class="note">Видео, звук и чат не работают, пока сверка не подтверждена.</small>
+</div>
+
+<h2>Звонок</h2>
+<div class="card">
+  <div class="row">
+    <button id="btnCall" class="primary">Позвонить</button>
+    <button id="btnEnd">Завершить</button>
+  </div>
+  <div class="status" id="callState">Собеседник ещё не звонит</div>
+  <div class="vidwrap" style="margin-top:8px">
+    <div>
+      <div class="vbox" id="peerBox"><video id="peerVideo" autoplay playsinline></video><div class="hint hidden" id="peerVidOff">Видео собеседника выключено</div></div>
+      <label>Собеседник</label>
+      <label>Звук собеседника</label>
+      <div class="meter"><i id="peerMeter"></i></div>
+      <label>Громкость динамиков: <span id="volVal">100%</span></label>
+      <input type="range" id="volRange" min="0" max="100" step="1" value="100" style="width:100%">
+    </div>
+    <div>
+      <div class="vbox"><video id="selfVideo" autoplay muted playsinline></video></div>
+      <label>Вы</label>
+      <div class="togglecol">
+        <button id="btnMic">Выключить/Включить микрофон</button>
+        <span class="toggleState" id="micInd">Микрофон включён</span>
+        <button id="btnCam">Выключить/Включить камеру</button>
+        <span class="toggleState" id="camInd">Камера включена</span>
+        <button id="btnPeerSound">Выключить/Включить звук</button>
+        <span class="toggleState" id="sndInd">Звук собеседника включён</span>
+        <button id="btnPeerVideo">Выключить/Включить видео собеседника</button>
+        <span class="toggleState" id="pvidInd">Видео собеседника включено</span>
+      </div>
+    </div>
+  </div>
+  <div class="status" id="diag">Диагностика появится во время звонка.</div>
+  <small class="note">Если видео чёрное — щёлкните по окну собеседника: браузер может блокировать автозапуск.</small>
+</div>
+
+<h2>Чат</h2>
+<div class="card">
+  <div id="chatBox"><div class="msg peer" style="background:transparent;color:var(--muted)">—</div></div>
+  <div class="row" style="margin-top:8px">
+    <input type="text" id="chatInput" placeholder="Сообщение">
+    <button id="btnSend">Отправить</button>
+  </div>
+  <div class="status" id="chatState">Чат заблокирован до сверки кода безопасности.</div>
+</div>
+
+<details>
+<summary>Инструкция: как пользоваться чатом</summary>
+<ol>
+<li>Подготовка. Обновите страницу с очисткой кэша (Ctrl+F5) на всех устройствах. При первом запросе сразу разрешите доступ к камере и микрофону.</li>
+<li>Устройства. Выберите камеру, микрофон и динамик. Выбор запоминается. Если список пуст — «Проверить доступ» и дайте разрешение; после проверки список обновится сам.</li>
+<li>Проверка. «Проверить доступ»: видно себя и полоску «Звук микрофона» — она должна двигаться, когда говорите.</li>
+<li>Тихий микрофон. Поднимите ползунок «Усиление микрофона» (работает и во время звонка). Громкость звука собеседника — ползунок «Громкость динамиков».</li>
+<li>Обмен кодами. А: «Начать чат» → дождитесь «Сбор ICE: complete» → «Скопировать» (код виден и в поле) → отправьте Б. Б: вставьте → «Применить код» → «Скопировать» ответный → отправьте обратно. А: вставьте → «Применить код». Дождитесь «Соединено ✓» с обеих сторон.</li>
+<li>Сверка. Появится код из 6 цифр — он обязан совпасть у обеих сторон. Сверьте голосом, затем оба нажмите «Коды совпали». После сверки можно использовать кнопку «Позвонить» и чат.</li>
+<li>Звонок. Оба нажмите «Позвонить». Дайте камере 8 секунд для начала стабильной передачи. «Завершить» → «Позвонить» — повторно, без нового обмена кодами. Под сообщением в чате: «⏳ отправляется…», затем «✓ доставлено».</li>
+<li>Тестирование на одном компьютере. Два браузера делят одну камеру: если в диалоге доступа отказать, захват не выполнится. Если захват камеры не выполнился, то разрешите в операционной системе работать с камерой нескольким программам</li>
+<li>Новый собеседник. Соединение одноразовое: обновите страницу (Ctrl+F5) и начните обмен кодами заново.</li>
+<li>Про шифрование. Коды соединения — это сетевые адреса; вы передаёте их сами, например мессенджером. Сам разговор шифруется всегда — это встроено в WebRTC. Код из 6 цифр защищает от подмены собеседника: сверяйте голосом, а не текстом.</li>
+</ol>
+</details>
+
+<details>
+<summary>Журнал (технические события)</summary>
+<div id="log">— пусто —</div>
+<button id="btnLogCopy" style="margin-top:8px">Скопировать журнал</button>
+</details>
+</div>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const logBox=$('log'); const logs=[];
+function log(msg,isErr){
+  const t=new Date().toLocaleTimeString('ru-RU');
+  const line='['+t+'] '+msg;
+  logs.push(line);
+  if(logBox.textContent==='— пусто —') logBox.textContent='';
+  const d=document.createElement('div');
+  d.textContent=line;
+  if(isErr) d.classList.add('err');
+  logBox.appendChild(d);
+  logBox.scrollTop=logBox.scrollHeight;
+}
+log('p2p-chat готов');
+
+// Тема
+if(localStorage.getItem('p2p-theme')==='dark'){document.documentElement.dataset.theme='dark';$('btnTheme').textContent='Светлая тема';}
+$('btnTheme').onclick=()=>{
+  const dark=document.documentElement.dataset.theme==='dark';
+  document.documentElement.dataset.theme=dark?'light':'dark';
+  $('btnTheme').textContent=dark?'Тёмная тема':'Светлая тема';
+  localStorage.setItem('p2p-theme',dark?'light':'dark');
+};
+
+// Устройства
+function fillList(selId,items,kind){
+  const sel=$(selId); const saved=localStorage.getItem('p2p-'+kind)||'';
+  sel.innerHTML='';
+  const o=document.createElement('option'); o.value=''; o.textContent='По умолчанию'; sel.appendChild(o);
+  items.forEach(d=>{
+    const op=document.createElement('option');
+    op.value=d.deviceId;
+    op.textContent=d.label||('Название скрыто — нужен доступ ('+d.deviceId.slice(0,8)+')');
+    sel.appendChild(op);
+  });
+  if([...sel.options].some(x=>x.value===saved)) sel.value=saved;
+}
+async function refreshDevices(silent){
+  try{
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    const cams=devs.filter(d=>d.kind==='videoinput');
+    const mics=devs.filter(d=>d.kind==='audioinput');
+    const spks=devs.filter(d=>d.kind==='audiooutput');
+    fillList('camList',cams,'cam');
+    fillList('micList',mics,'mic');
+    fillList('spkList',spks,'spk');
+    log('Устройства: камер '+cams.length+', микрофонов '+mics.length+', динамиков '+spks.length);
+  }catch(e){ log('ОШИБКА списка устройств: '+e.message,true); }
+}
+navigator.mediaDevices.addEventListener&&navigator.mediaDevices.addEventListener('devicechange',()=>refreshDevices(true));
+refreshDevices();
+
+$('btnRefresh').onclick=()=>{log('Нажата кнопка «Обновить список устройств»');refreshDevices();};
+let checkStream=null;
+$('btnCheck').onclick=async()=>{
+  log('Нажата кнопка «Проверить доступ»');
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    checkStream=s;
+    if(!$('selfVideo').srcObject) $('selfVideo').srcObject=s;
+    await refreshDevices(true);
+    log('Проверка доступа: камера и микрофон работают (10 секунд)');
+    setTimeout(()=>{ s.getTracks().forEach(t=>t.stop()); if($('selfVideo').srcObject===s)$('selfVideo').srcObject=null; log('Проверка доступа завершена'); refreshDevices(true); },10000);
+  }catch(e){ log('ОШИБКА доступа: '+e.message,true); }
+};
+['camList','micList','spkList'].forEach(id=>{
+  $(id).addEventListener('change',()=>{
+    const kind=id==='camList'?'cam':id==='micList'?'mic':'spk';
+    localStorage.setItem('p2p-'+kind,$(id).value);
+    log('Выбрано устройство: '+kind+' — '+($(id).selectedOptions[0]?$(id).selectedOptions[0].textContent:''));
+    if(kind==='spk'&&peerAudio&&peerAudio.setSinkId){
+      const v=$(id).value;
+      if(v) peerAudio.setSinkId(v).catch(()=>{});
+    }
+  });
+});
+
+// Усиление и громкость
+const gainRange=$('gainRange'),gainVal=$('gainVal');
+const savedGain=localStorage.getItem('p2p-gain')||'1';
+gainRange.value=savedGain;
+gainVal.textContent='×'+parseFloat(savedGain).toFixed(1);
+let gainNode=null;
+function applyGain(){
+  const g=parseFloat(gainRange.value);
+  gainVal.textContent='×'+g.toFixed(1);
+  localStorage.setItem('p2p-gain',gainRange.value);
+  if(gainNode) gainNode.gain.value=g;
+}
+gainRange.addEventListener('input',applyGain);
+const volRange=$('volRange'),volVal=$('volVal');
+volRange.addEventListener('input',()=>{
+  const v=parseInt(volRange.value,10);
+  volVal.textContent=v+'%';
+  localStorage.setItem('p2p-vol',volRange.value);
+  if(peerAudio) peerAudio.volume=v/100;
+});
+const savedVol=localStorage.getItem('p2p-vol');
+if(savedVol!=null){volRange.value=savedVol;volVal.textContent=savedVol+'%';}
+
+// Состояния
+let pc=null,role=null,verified=false,secCode=null,calling=false;
+let transA=null,transV=null,localStream=null;
+let outStream=null,acx=null,destNode=null;
+let localChans={},remoteChans={};
+let lastRemoteSdp=null;
+const peerVideo=$('peerVideo'),selfVideo=$('selfVideo');
+const peerAudio=document.createElement('audio');
+peerAudio.autoplay=true;
+peerAudio.volume=parseInt(volRange.value,10)/100;
+let peerAudioLogged=false;
+let micOn=true,camOn=true,peerSoundOn=true,peerVideoOn=true;
+let ackTimers={};
+let wdTimer=null,wdTries=0,statsTimer=null,lastStats=null;
+
+function setConn(s){$('connState').textContent=s;}
+function setInd(id,on,labelOn,labelOff){
+  const el=$(id);if(!el)return;
+  el.textContent=on?labelOn:labelOff;
+  el.style.color=on?'':'var(--err)';
+}
+function updateStatusLine(){
+  $('devStatus').textContent='Микрофон: '+(micOn?'включён':'выключен')+'. Камера: '+(camOn?'включена':'выключена')+'. Звук: '+(peerSoundOn?'включён':'выключен')+'. Видео собеседника: '+(peerVideoOn?'включено':'выключено')+'.';
+  setInd('micInd',micOn,'Микрофон включён','Микрофон выключен');
+  setInd('camInd',camOn,'Камера включена','Камера выключена');
+  setInd('sndInd',peerSoundOn,'Звук собеседника включён','Звук собеседника выключен');
+  setInd('pvidInd',peerVideoOn,'Видео собеседника включено','Видео собеседника выключено');
+}
+updateStatusLine();
+
+// Сборка и разбор кода
+function fnv1a(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0;}return h>>>0;}
+function b64urlEnc(bytes){let s=btoa(String.fromCharCode.apply(null,bytes));return s.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function b64urlDec(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;}
+async function deflate(bytes){
+  if(!('CompressionStream' in window)) return bytes;
+  try{
+    const cs=new CompressionStream('deflate-raw');
+    const w=cs.writable.getWriter();w.write(bytes);w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  }catch(e){return bytes;}
+}
+async function inflate(bytes){
+  if('DecompressionStream' in window){
+    try{
+      const ds=new DecompressionStream('deflate-raw');
+      const w=ds.writable.getWriter();w.write(bytes);w.close();
+      return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+    }catch(e){}
+  }
+  return bytes;
+}
+async function buildCode(type,sdp){
+  const payload=new TextEncoder().encode(JSON.stringify({t:type,s:sdp}));
+  const comp=await deflate(payload);
+  const body=b64urlEnc(comp);
+  const cs=fnv1a(body).toString(16);
+  return 'P2P-CHAT-BEGIN\nP2P1 '+type+' '+cs+' '+body+'\nP2P-CHAT-END';
+}
+async function parseCode(text){
+  let t=(text||'').replace(/\u00a0/g,' ').replace(/[\u200b-\u200f\u2028\u2029\uFEFF]/g,'').replace(/[«»“”"]/g,'');
+  const m=t.match(/P2P-CHAT-BEGIN([\s\S]*?)P2P-CHAT-END/i);
+  let inner=m?m[1]:t;
+  inner=inner.replace(/\s+/g,'');
+  const mm=inner.match(/^P2P1(offer|answer)([0-9a-f]{1,8})([A-Za-z0-9_\-=]+)$/i);
+  if(!mm) return {error:'неизвестный формат кода'};
+  const type=mm[1],cs=mm[2],body=mm[3];
+  if(fnv1a(body)!==parseInt(cs,16)) return {error:'контрольная сумма не совпала — код исказился при передаче'};
+  let bytes;
+  try{bytes=b64urlDec(body);}catch(e){return {error:'тело не читается ('+e.message+')'};}
+  let raw=await inflate(bytes);
+  let json;
+  try{json=JSON.parse(new TextDecoder().decode(raw));}catch(e){return {error:'внутри не читается ('+e.message+')'};}
+  if(!json.s||String(json.s).indexOf('v=0')!==0) return {error:'в теле нет SDP'};
+  return {type:type,sdp:json.s};
+}
+async function selfCheck(code,type,sdp){
+  const r=await parseCode(code);
+  if(r.error){log('ОШИБКА самопроверки кода: '+r.error,true);return false;}
+  if(r.type!==type){log('ОШИБКА самопроверки кода: тип в коде ('+r.type+') не совпал с созданным ('+type+')',true);return false;}
+  const cur=(pc&&pc.localDescription)?pc.localDescription.sdp:null;
+  if(cur&&r.sdp!==cur){log('ОШИБКА самопроверки кода: тело в коде ('+r.sdp.length+' символов) отличается от текущего описания ('+cur.length+' символов)',true);return false;}
+  const bodyLen=code.replace(/P2P-CHAT-BEGIN|P2P-CHAT-END/g,'').replace(/\s+/g,'').length;
+  log('Самопроверка кода: OK ('+bodyLen+' символов тела)');
+  return true;
+}
+$('btnCopy').onclick=async()=>{
+  const code=$('ownCode').value;
+  if(!code){log('Кода ещё нет — сначала «Начать чат» или «Применить код»',true);return;}
+  const ok=await copyText(code);
+  if(ok) log('Код скопирован в буфер обмена');
+};
+async function copyText(text){
+  try{await navigator.clipboard.writeText(text);return true;}
+  catch(e){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      const ok=document.execCommand('copy');
+      ta.remove();return ok;
+    }catch(e2){return false;}
+  }
+}
+
+// Код безопасности
+function fingerprintsOf(sdp){
+  const out=[];const re=/a=fingerprint:sha-256 ([0-9A-F:]{95})/gi;let m;
+  while((m=re.exec(sdp))!==null){if(out.indexOf(m[1].toUpperCase())<0)out.push(m[1].toUpperCase());}
+  return out;
+}
+function hexToBytes(h){const u=new Uint8Array(h.length/2);for(let i=0;i<u.length;i++)u[i]=parseInt(h.substr(i*2,2),16);return u;}
+async function sha256hex(s){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+async function computeSecurityCode(){
+  try{
+    if(!pc||!pc.localDescription||!pc.remoteDescription) return;
+    const fl=fingerprintsOf(pc.localDescription.sdp);
+    const fr=fingerprintsOf(pc.remoteDescription.sdp);
+    if(!fl.length||!fr.length){log('ОШИБКА кода безопасности: отпечатки не найдены (локально '+fl.length+', удалённо '+fr.length+')',true);return;}
+    const all=[...fl,...fr].sort();
+    let acc=new Uint8Array(32);
+    for(const fp of all){
+      const h=await sha256hex(fp);
+      const b=hexToBytes(h);
+      for(let i=0;i<32;i++) acc[i]^=b[i];
+    }
+    const code=(acc[0]*16777216+acc[1]*65536+acc[2]*256+acc[3])%1000000;
+    const s=String(code).padStart(6,'0');
+    secCode=s;$('secCode').textContent=s;
+    log('Код безопасности вычислен: '+s+' (отпечатков: '+fl.length+' и '+fr.length+')');
+  }catch(e){log('ОШИБКА кода безопасности: '+e.message,true);}
+}
+function retrySecurityCode(){
+  if(!secCode&&pc&&pc.localDescription&&pc.remoteDescription) setTimeout(computeSecurityCode,1000);
+}
+$('btnVerify').onclick=()=>{
+  if(verified){log('Сверка уже пройдена');return;}
+  if(!secCode){log('Код безопасности ещё не вычислен — подождите',true);return;}
+  verified=true;
+  $('secStatus').textContent='Сверка пройдена — звонок и чат разблокированы.';
+  $('chatState').textContent='';
+  log('Сверка пройдена — звонок и чат разблокированы');
+  if(acx&&acx.state==='suspended')acx.resume().catch(()=>{});
+};
+
+// Соединение
+function wirePc(){
+  pc.onicecandidate=e=>{if(e.candidate)log('Кандидат ICE собран');};
+  pc.onicegatheringstatechange=()=>{$('iceState').textContent=pc.iceGatheringState;log('Сбор ICE: '+pc.iceGatheringState);};
+  pc.oniceconnectionstatechange=()=>{
+    log('ICE: '+pc.iceConnectionState);
+    if(pc.iceConnectionState==='connected'||pc.iceConnectionState==='completed'){setConn('connected');computeSecurityCode();}
+  };
+  pc.onconnectionstatechange=()=>{
+    setConn(pc.connectionState);
+    if(pc.connectionState==='connected'){log('Соединение: connected ✓');computeSecurityCode();retrySecurityCode();playPeer();}
+    else if(pc.connectionState==='failed')log('Соединение не установлено — проверьте сеть и повторите обмен кодами',true);
+  };
+  pc.ondatachannel=e=>{
+    if(e.channel.label==='chat'||e.channel.label==='ctl'){remoteChans[e.channel.label]=e.channel;wire(e.channel,'получен');}
+  };
+  pc.ontrack=onTrack;
+}
+function gatherComplete(){
+  return new Promise(res=>{
+    if(!pc){res();return;}
+    if(pc.iceGatheringState==='complete'){res();return;}
+    const to=setTimeout(finish,5000);
+    function on(){if(pc.iceGatheringState==='complete')finish();}
+    function finish(){clearTimeout(to);pc.removeEventListener('icegatheringstatechange',on);res();}
+    pc.addEventListener('icegatheringstatechange',on);
+  });
+}
+$('btnStart').onclick=async()=>{
+  if(pc){log('Уже идёт обмен или соединение установлено — обновите страницу (Ctrl+F5) для нового сеанса',true);return;}
+  role='initiator';verified=false;secCode=null;lastRemoteSdp=null;
+  $('secCode').textContent='······';
+  $('secStatus').textContent='Сверка не пройдена — звонок и чат заблокированы.';
+  $('chatState').textContent='Чат заблокирован до сверки кода безопасности.';
+  log('Нажата кнопка «Начать чат»');
+  pc=new RTCPeerConnection({iceServers:[]});
+  wirePc();
+  transA=pc.addTransceiver('audio',{direction:'sendrecv'});
+  transV=pc.addTransceiver('video',{direction:'sendrecv'});
+  registerLocal(pc.createDataChannel('ctl',{ordered:true}));
+  registerLocal(pc.createDataChannel('chat',{ordered:true}));
+  log('Передатчики созданы: 2 линии (audio, video), обе sendrecv');
+  await pc.setLocalDescription(await pc.createOffer());
+  log('Предложение создано');
+  await gatherComplete();
+  const code=await buildCode('offer',pc.localDescription.sdp);
+  $('ownCode').value=code;
+  if(!await selfCheck(code,'offer',pc.localDescription.sdp))return;
+  lastRemoteSdp=pc.localDescription.sdp;
+  log('Предложение создано, код готов к отправке');
+};
+$('btnApply').onclick=async()=>{
+  log('Нажата кнопка «Применить код»');
+  const text=$('peerCode').value;
+  const r=await parseCode(text);
+  if(r.error){log('ОШИБКА разбора кода: '+r.error,true);return;}
+  log('Код разобран: тип '+r.type.toUpperCase());
+  if(lastRemoteSdp===r.sdp){log('Код уже применён — пропускаю');return;}
+  try{
+    if(r.type==='offer'){
+      if(pc){log('ОШИБКА: получено предложение, но соединение уже создано — обновите страницу (Ctrl+F5) для нового сеанса',true);return;}
+      role='responder';verified=false;secCode=null;
+      $('secCode').textContent='······';
+      $('secStatus').textContent='Сверка не пройдена — звонок и чат заблокированы.';
+      $('chatState').textContent='Чат заблокирован до сверки кода безопасности.';
+      pc=new RTCPeerConnection({iceServers:[]});
+      wirePc();
+      await pc.setRemoteDescription({type:'offer',sdp:r.sdp});
+      for(const t of pc.getTransceivers()){if(t.direction==='recvonly')t.direction='sendrecv';}
+      log('Код собеседника применён (предложение)');
+      await pc.setLocalDescription(await pc.createAnswer());
+      log('Ответ создан');
+      computeSecurityCode();
+      await gatherComplete();
+      const code=await buildCode('answer',pc.localDescription.sdp);
+      $('ownCode').value=code;
+      if(!await selfCheck(code,'answer',pc.localDescription.sdp))return;
+      lastRemoteSdp=r.sdp;
+      log('Ответ создан, код готов к отправке — отправьте его инициатору');
+    }else if(r.type==='answer'){
+      if(!pc||role!=='initiator'){log('ОШИБКА: получен ответ, но вы не создавали предложение — нажмите «Начать чат» и отправьте свой код первым',true);return;}
+      await pc.setRemoteDescription({type:'answer',sdp:r.sdp});
+      lastRemoteSdp=r.sdp;
+      log('Код собеседника применён (ответ)');
+      computeSecurityCode();
+      log('Обмен кодами завершён');
+    }else{
+      log('ОШИБКА применения кода: неизвестный тип '+r.type,true);
+    }
+  }catch(e){log('ОШИБКА применения кода: '+e.message,true);}
+};
+
+// Дорожки собеседника
+function onTrack(e){
+  const track=e.track;
+  log('ontrack: '+track.kind);
+  const full=e.streams[0]||new MediaStream([track]);
+  if(track.kind==='video'){
+    peerVideo.srcObject=new MediaStream(full.getVideoTracks());
+    log('Экран собеседника подключён к живой дорожке');
+  }else{
+    peerAudio.srcObject=new MediaStream(full.getAudioTracks());
+    log('Экран собеседника подключён к живой дорожке');
+    meterSetup(peerAudio.srcObject,'peerMeter');
+    playPeer();
+  }
+}
+function playPeer(){
+  if(!peerAudio.srcObject)return;
+  peerAudio.play().then(()=>{if(!peerAudioLogged){peerAudioLogged=true;log('Звук собеседника воспроизводится');}}).catch(()=>log('Автозапуск заблокирован — щёлкните по окну собеседника'));
+  if(peerVideo.srcObject)peerVideo.play().catch(()=>log('Автозапуск заблокирован — щёлкните по окну собеседника'));
+}
+$('peerBox').onclick=playPeer;
+
+// Каналы
+function registerLocal(ch){
+  localChans[ch.label]=ch;
+  wire(ch,'локальный');
+}
+function wire(ch,origin){
+  ch.onopen=()=>log('Канал '+ch.label+' открыт ('+origin+')');
+  ch.onclose=()=>log('Канал '+ch.label+' закрыт');
+  ch.onmessage=ev=>handleMsg(ch.label,ev.data);
+}
+function pickChan(label){
+  const r=remoteChans[label];
+  if(r&&r.readyState==='open')return r;
+  const l=localChans[label];
+  if(l&&l.readyState==='open')return l;
+  return null;
+}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+function handleMsg(label,raw){
+  let m;try{m=JSON.parse(raw);}catch(e){return;}
+  if(m.k==='msg'){
+    addChatLine('Собеседник',m.text);
+    log('Чат: получено сообщение, подтверждение отправлено');
+    const ch=pickChan('ctl')||pickChan('chat');
+    if(ch)try{ch.send(JSON.stringify({k:'ack',id:m.id}));}catch(e){}
+  }else if(m.k==='ack'){
+    if(ackTimers[m.id]){clearTimeout(ackTimers[m.id]);delete ackTimers[m.id];}
+    setStatus(m.id,'✓ доставлено');
+    log('Чат: подтверждение доставки получено');
+  }else if(m.k==='call-start'){
+    log('Собеседник начал звонок');$('callState').textContent='Собеседник звонит';
+  }else if(m.k==='call-end'){
+    log('Собеседник завершил звонок');$('callState').textContent='Собеседник ещё не звонит';
+  }
+}
+function addChatLine(who,text){
+  const box=$('chatBox');
+  const d=document.createElement('div');
+  d.className='msg '+(who==='Вы'?'me':'peer');
+  d.dataset.id='';
+  d.innerHTML='';
+  const b=document.createElement('b');b.textContent=who==='Вы'?'Вы: ':'Собеседник: ';
+  d.appendChild(b);
+  d.appendChild(document.createTextNode(text));
+  const st=document.createElement('span');st.className='st';st.textContent='';d.appendChild(st);
+  box.appendChild(d);box.scrollTop=box.scrollHeight;
+  return st;
+}
+function setStatus(id,text){
+  const box=$('chatBox');
+  for(const d of box.querySelectorAll('.msg.me')){
+    if(d.dataset.id===id){d.querySelector('.st').textContent=text;return;}
+  }
+}
+function armAckTimer(id){
+  ackTimers[id]=setTimeout(()=>{
+    delete ackTimers[id];
+    const box=$('chatBox');
+    for(const d of box.querySelectorAll('.msg.me')){
+      if(d.dataset.id===id&&d.querySelector('.st').textContent.indexOf('доставлено')<0){
+        d.querySelector('.st').textContent='нет подтверждения — собеседник не в сети?';
+      }
+    }
+  },8000);
+}
+$('btnSend').onclick=()=>{
+  const inp=$('chatInput');
+  const text=inp.value.trim();
+  if(!text)return;
+  inp.value='';
+  if(!verified){log('Чат заблокирован до сверки кода безопасности',true);return;}
+  const ch=pickChan('chat');
+  if(!ch){log('ОШИБКА: канал чата не открыт',true);const st=addChatLine('Вы',text);st.textContent='нет подтверждения — собеседник не в сети?';return;}
+  const id=uid();
+  const st=addChatLine('Вы',text);
+  st.textContent='⏳ отправляется…';
+  // пометить id
+  const box=$('chatBox');const last=box.querySelector('.msg.me:last-child');if(last)last.dataset.id=id;
+  try{
+    ch.send(JSON.stringify({k:'msg',id,text}));
+    log('Чат: сообщение отправлено');
+    armAckTimer(id);
+  }catch(e){
+    st.textContent='нет подтверждения — собеседник не в сети?';
+    log('ОШИБКА отправки: '+e.message,true);
+  }
+};
+$('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('btnSend').click();});
+
+// Индикаторы звука
+function meterSetup(stream,barId){
+  try{
+    if(!acx)acx=new (window.AudioContext||window.webkitAudioContext)();
+    if(acx.state==='suspended')acx.resume().catch(()=>{});
+    const src=acx.createMediaStreamSource(stream);
+    const an=acx.createAnalyser();an.fftSize=512;
+    src.connect(an);
+    const buf=new Uint8Array(an.frequencyBinCount);
+    (function tick(){
+      an.getByteTimeDomainData(buf);
+      let peak=0;
+      for(let i=0;i<buf.length;i++)peak=Math.max(peak,Math.abs(buf[i]-128));
+      const bar=$(barId);
+      if(bar)bar.style.width=Math.min(100,peak/64*100)+'%';
+      requestAnimationFrame(tick);
+    })();
+  }catch(e){log('ОШИБКА индикатора звука: '+e.message,true);}
+}
+
+// Звонок
+function findTrans(kind){
+  if(!pc)return null;
+  const list=pc.getTransceivers();
+  if(kind==='audio'&&transA&&transA.sender)return transA;
+  if(kind==='video'&&transV&&transV.sender)return transV;
+  return list.find(t=>t.receiver&&t.receiver.track&&t.receiver.track.kind===kind)||null;
+}
+async function captureDevices(){
+  const cons={audio:true,video:{width:{ideal:1280},height:{ideal:720}}};
+  const micSel=localStorage.getItem('p2p-mic')||$('micList').value;
+  const camSel=localStorage.getItem('p2p-cam')||$('camList').value;
+  if(micSel)cons.audio={deviceId:{exact:micSel}};
+  if(camSel)cons.video={deviceId:{exact:camSel},width:{ideal:1280},height:{ideal:720}};
+  if(localStream)localStream.getTracks().forEach(t=>t.stop());
+  localStream=await navigator.mediaDevices.getUserMedia(cons);
+  const a=localStream.getAudioTracks()[0],v=localStream.getVideoTracks()[0];
+  log('Захвачено: '+(a?a.label:'—')+' · '+(v?v.label:'—'));
+  // усиление
+  try{
+    if(!acx)acx=new (window.AudioContext||window.webkitAudioContext)();
+    if(acx.state==='suspended')await acx.resume().catch(()=>{});
+    if(srcNodeGlobal){try{srcNodeGlobal.disconnect();}catch(e){}}
+    if(gainNode){try{gainNode.disconnect();}catch(e){}}
+    srcNodeGlobal=acx.createMediaStreamSource(new MediaStream([a]));
+    gainNode=acx.createGain();
+    gainNode.gain.value=parseFloat(gainRange.value);
+    destNode=acx.createMediaStreamDestination();
+    srcNodeGlobal.connect(gainNode);gainNode.connect(destNode);
+    outStream=destNode.stream;
+  }catch(e){log('ОШИБКА усиления: '+e.message+' — звук уйдёт без усиления',true);outStream=localStream;}
+  selfVideo.srcObject=localStream;
+  micOn=a?a.enabled:true;camOn=v?v.enabled:true;updateStatusLine();
+  meterSetup(new MediaStream([a]),'myMeter');
+  const spkSel=localStorage.getItem('p2p-spk')||$('spkList').value;
+  if(spkSel&&peerAudio.setSinkId)peerAudio.setSinkId(spkSel).catch(()=>{});
+  peerAudio.volume=parseInt(volRange.value,10)/100;
+  // подстановка в трансиверы: аудио — из потока усиления, видео — всегда из исходного потока
+  const at=outStream.getAudioTracks()[0]||localStream.getAudioTracks()[0];
+  const vt=localStream.getVideoTracks()[0]||outStream.getVideoTracks()[0];
+  const ta=findTrans('audio'),tv=findTrans('video');
+  if(ta&&ta.sender){await ta.sender.replaceTrack(at||null);log('audio: подставлено в трансивер'+(at&&at.readyState==='live'?' (жива)':' — дорожки нет'));if(at&&at.readyState!=='live')log('ОШИБКА: аудиодорожка не жива',true);}
+  if(tv&&tv.sender){await tv.sender.replaceTrack(vt||null);log('video: подставлено в трансивер'+(vt&&vt.readyState==='live'?' (жива)':' — дорожки нет'));if(vt&&vt.readyState!=='live')log('ОШИБКА: видеодорожка не жива',true);}
+}
+let srcNodeGlobal=null,destNodeGlobal=null;
+async function startCall(){
+  if(!verified){log('Сверка не пройдена — сначала нажмите «Коды совпали»',true);return;}
+  if(!pc){log('Сначала завершите обмен кодами — нажмите «Начать чат»',true);return;}
+  if(pc.connectionState!=='connected'){log('Соединение ещё не установлено — подождите «connected»',true);return;}
+  if(calling){log('Звонок уже идёт');return;}
+  try{
+    calling=true;wdTries=0;
+    await captureDevices();
+    log('Звонок начат');
+    sendCtl({k:'call-start'});
+    startStats();
+    startWatchdog();
+  }catch(e){
+    calling=false;
+    let hint='';
+    if(e.name==='NotReadableError')hint=' Закройте Phone Link, Zoom, OBS и другие программы, работающие с камерой.';
+    if(e.name==='NotAllowedError')hint=' Доступ к устройствам не выдан.';
+    log('ОШИБКА захвата: '+(e.name||'Ошибка')+' — '+(e.message||'браузер не указал причину')+'.'+hint,true);
+  }
+}
+function startWatchdog(){
+  clearInterval(wdTimer);
+  setTimeout(async()=>{if(calling&&await sendingOk())log('Проверка отправки: видео и звук отправляются ✓');},8000);
+  wdTimer=setInterval(async()=>{
+    if(!calling){clearInterval(wdTimer);return;}
+    if(await sendingOk()){wdTries=0;return;}
+    wdTries++;
+    if(wdTries>3){log('ОШИБКА: отправка так и не началась — проверьте устройства',true);clearInterval(wdTimer);return;}
+    log('Нет отправки — перезапуск устройств, попытка '+wdTries+'/3');
+    try{await captureDevices();}catch(e){log('ОШИБКА захвата: '+(e.name||'Ошибка')+' — '+(e.message||'браузер не указал причину'),true);}
+  },5000);
+}
+async function sendingOk(){
+  if(!pc||!localStream)return false;
+  const senders=pc.getSenders().filter(s=>s.track);
+  if(senders.length<2)return false;
+  const at=localStream.getAudioTracks()[0],vt=localStream.getVideoTracks()[0];
+  return (!at||at.readyState==='live')&&(!vt||vt.readyState==='live')&&senders.every(s=>s.track.readyState==='live');
+}
+function endCall(){
+  if(!calling){log('Звонок не идёт');return;}
+  calling=false;
+  clearInterval(wdTimer);stopStats();
+  if(localStream)localStream.getTracks().forEach(t=>t.stop());
+  localStream=null;
+  if(pc)pc.getSenders().forEach(s=>{if(s.track){try{s.replaceTrack(null);}catch(e){}}});
+  selfVideo.srcObject=null;
+  sendCtl({k:'call-end'});
+  $('diag').textContent='Диагностика появится во время звонка.';
+  log('Звонок завершён');
+}
+$('btnCall').onclick=startCall;
+$('btnEnd').onclick=endCall;
+
+// Переключатели
+$('btnMic').onclick=async()=>{
+  if(localStream&&localStream.getAudioTracks()[0]){
+    const t=localStream.getAudioTracks()[0];
+    t.enabled=!t.enabled;micOn=t.enabled;
+    log(micOn?'Микрофон включен':'Микрофон выключен');
+  }else{micOn=!micOn;log(micOn?'Микрофон включен':'Микрофон выключен');}
+  updateStatusLine();
+};
+$('btnCam').onclick=()=>{
+  if(localStream&&localStream.getVideoTracks()[0]){
+    const t=localStream.getVideoTracks()[0];
+    t.enabled=!t.enabled;camOn=t.enabled;
+    log(camOn?'Камера включена':'Камера выключена');
+  }else{camOn=!camOn;log(camOn?'Камера включена':'Камера выключена');}
+  updateStatusLine();
+};
+$('btnPeerSound').onclick=()=>{
+  peerSoundOn=!peerSoundOn;
+  peerAudio.muted=!peerSoundOn;
+  log(peerSoundOn?'Звук собеседника включён':'Звук собеседника выключен');
+  updateStatusLine();
+};
+$('btnPeerVideo').onclick=()=>{
+  peerVideoOn=!peerVideoOn;
+  $('peerVidOff').classList.toggle('hidden',peerVideoOn);
+  peerVideo.style.visibility=peerVideoOn?'visible':'hidden';
+  log(peerVideoOn?'Видео собеседника включено':'Видео собеседника выключено (звук не затронут)');
+  updateStatusLine();
+};
+
+// Скорости
+function startStats(){
+  stopStats();lastStats=null;
+  statsTimer=setInterval(async()=>{
+    if(!pc||pc.connectionState!=='connected')return;
+    try{
+      const rep=await pc.getStats();
+      const now={};
+      rep.forEach(r=>{
+        if(r.type==='outbound-rtp'&&r.kind)now['o'+r.kind]=r.bytesSent||0;
+        if(r.type==='inbound-rtp'&&r.kind)now['i'+r.kind]=r.bytesReceived||0;
+      });
+      now.t=Date.now();
+      if(lastStats&&lastStats.t){
+        const dt=(now.t-lastStats.t)/1000;
+        const f=k=>(lastStats[k]!=null?((now[k]-lastStats[k])/dt/1024).toFixed(1):'0.0');
+        const line='Скорость: отправки аудио '+f('oaudio')+' килобайт в секунду, видео '+f('ovideo')+' килобайт в секунду · приёма аудио '+f('iaudio')+' килобайт в секунду, видео '+f('ivideo')+' килобайт в секунду';
+        $('diag').textContent=line;
+        log(line);
+      }
+      lastStats=now;
+    }catch(e){}
+  },10000);
+}
+function stopStats(){if(statsTimer){clearInterval(statsTimer);statsTimer=null;}lastStats=null;}
+
+// Журнал
+$('btnLogCopy').onclick=async()=>{
+  const ok=await copyText(logs.join('\n'));
+  if(ok)log('Журнал скопирован: '+logs.length+' строк');
+  else log('Не удалось скопировать журнал — выделите текст вручную',true);
+};
+
+// ctl
+function sendCtl(obj){
+  const ch=pickChan('ctl')||pickChan('chat');
+  if(ch)try{ch.send(JSON.stringify(obj));}catch(e){}
+}
+</script>
+</body>
+</html>
